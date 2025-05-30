@@ -5,7 +5,7 @@ define('DB_PATH', __DIR__ . '/database.sqlite');
 // Application settings
 define('APP_NAME', 'Islamic Guidance & Education');
 define('DEFAULT_LANG', 'en'); // Default language
-define('BASE_URL', 'http://localhost/new22'); // Adjust if your server runs on a different port/domain
+define('BASE_URL', 'http://localhost/islamic%20guidence%20q&a%20and%20forum%20app'); // Adjust if your server runs on a different port/domain
 
 // Security settings
 define('CSRF_TOKEN_LENGTH', 32);
