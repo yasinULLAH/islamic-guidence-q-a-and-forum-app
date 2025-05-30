@@ -1,0 +1,56 @@
+/* Custom Islamic Theme Styles */
+
+/* General Body Styles */
+body {
+    font-family: 'Amiri', serif; /* Example Arabic font, adjust as needed */
+    background-color: #f8f9fa; /* Light background */
+    color: #343a40; /* Dark text */
+}
+
+/* Navbar Styling */
+.navbar {
+    background-color: #28a745 !important; /* Islamic green */
+}
+
+.navbar-brand, .nav-link {
+    color: #ffffff !important; /* White text */
+}
+
+.navbar-brand:hover, .nav-link:hover {
+    color: #ffc107 !important; /* Gold on hover */
+}
+
+/* Card Styling */
+.card {
+    border: 1px solid #28a745; /* Green border */
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.card-title {
+    color: #28a745; /* Green title */
+}
+
+.btn-primary {
+    background-color: #007bff; /* Blue for primary buttons */
+    border-color: #007bff;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}
+
+/* Placeholder for RTL support */
+/* .rtl {
+    direction: rtl;
+    text-align: right;
+} */
+
+/* Placeholder for Arabic typography adjustments */
+/* .arabic-text {
+    font-family: 'Amiri', serif;
+    line-height: 1.8;
+} */
+
+/* Further styles will be added here for specific components,
+   infographics, user management, etc. */
