@@ -1,0 +1,141 @@
+/* Custom Islamic Theme Styles */
+
+/* General Body Styles */
+body {
+    font-family: 'Amiri', serif; /* Example Arabic font, adjust as needed */
+    background-color: #f8f9fa; /* Light background */
+    color: #343a40; /* Dark text */
+}
+
+/* Navbar Styling */
+.navbar {
+    background-color: #28a745 !important; /* Islamic green */
+}
+
+.navbar-brand, .nav-link {
+    color: #ffffff !important; /* White text */
+}
+
+.navbar-brand:hover, .nav-link:hover {
+    color: #ffc107 !important; /* Gold on hover */
+}
+
+/* Card Styling */
+.card {
+    border: 1px solid #28a745; /* Green border */
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.card-title {
+    color: #28a745; /* Green title */
+}
+
+.btn-primary {
+    background-color: #007bff; /* Blue for primary buttons */
+    border-color: #007bff;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}
+
+/* Placeholder for RTL support */
+/* .rtl {
+    direction: rtl;
+    text-align: right;
+} */
+
+/* Placeholder for Arabic typography adjustments */
+/* .arabic-text {
+    font-family: 'Amiri', serif;
+    line-height: 1.8;
+} */
+
+/* Further styles will be added here for specific components,
+   infographics, user management, etc. */
+
+/* --- Horizontal Tree View Styles --- */
+#guideTree {
+    display: flex;
+    flex-direction: column; /* Start with column to stack levels */
+    align-items: center;
+    padding: 20px;
+    overflow-x: auto; /* Allow horizontal scrolling if tree is wide */
+}
+
+.tree-level {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-bottom: 50px; /* Space between levels */
+    position: relative;
+}
+
+.tree-node-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 20px; /* Space between nodes on the same level */
+}
+
+.tree-node {
+    background-color: #007bff; /* Blue nodes */
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    text-align: center;
+    min-width: 100px;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    transition: background-color 0.3s ease;
+    position: relative;
+    z-index: 1; /* Ensure node is above lines */
+}
+
+.tree-node:hover {
+    background-color: #0056b3;
+}
+
+/* Connectors */
+.tree-node-container::before { /* Vertical line from parent */
+    content: '';
+    position: absolute;
+    top: -50px; /* Half of margin-bottom */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 50px;
+    background-color: #ccc;
+    z-index: 0;
+}
+
+.tree-level:first-child .tree-node-container::before {
+    content: none; /* No vertical line for the root node */
+}
+
+.tree-level-connector { /* Horizontal line connecting siblings */
+    position: absolute;
+    top: -25px; /* Halfway up the vertical line */
+    left: 0;
+    right: 0;
+    height: 2px;
+    background-color: #ccc;
+    z-index: 0;
+}
+
+/* Specific styling for the root node (if applicable) */
+.tree-node.root-node {
+    background-color: #6f42c1; /* Purple for root */
+}
+
+/* Example for different node colors based on difficulty or category */
+.tree-node.difficulty-beginner { background-color: #28a745; } /* Green */
+.tree-node.difficulty-intermediate { background-color: #ffc107; } /* Yellow */
+.tree-node.difficulty-advanced { background-color: #dc3545; } /* Red */
+
+/* Adjustments for the actual tree structure */
+/* This CSS assumes a flat horizontal layout for steps,
+   as our data doesn't have explicit parent-child step relationships.
+   If a true hierarchy is needed, the HTML structure and CSS would be more complex. */
