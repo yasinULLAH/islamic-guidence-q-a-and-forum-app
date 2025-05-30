@@ -41,4 +41,4 @@ Contributions are welcome! Please feel free to fork the repository, create a new
 This project is licensed under the MIT License. See the `LICENSE` file for details. | یہ پروجیکٹ MIT لائسنس کے تحت لائسنس یافتہ ہے۔ تفصیلات کے لیے `LICENSE` فائل دیکھیں۔
 
 ## 📧 Contact | 📧 رابطہ
-For any inquiries, please open an issue on GitHub or contact [your-email@example.com]. | کسی بھی سوال کے لیے، براہ کرم گٹ ہب پر ایک ایشو کھولیں یا [your-email@example.com] پر رابطہ کریں۔
+For any inquiries, please open an issue on GitHub or contact [yasincomps@gmail.com]. | کسی بھی سوال کے لیے، براہ کرم گٹ ہب پر ایک ایشو کھولیں یا [yasincomps@gmail.com] پر رابطہ کریں۔
