@@ -261,6 +261,24 @@ function handle_route($route) {
                 redirect(BASE_URL . '/');
             }
             break;
+        case 'edit_guide':
+            // Check if user is logged in and has permission (Admin or Ulama who owns the guide)
+            // The view itself will perform a more detailed check based on guide ownership
+            if (is_logged_in()) {
+                include 'views/guides/edit_guide.php';
+            } else {
+                redirect(BASE_URL . '/?route=login');
+            }
+            break;
+        case 'edit_topic':
+            // Check if user is logged in and has permission (Admin or topic author)
+            // The view itself will perform a more detailed check based on topic ownership
+            if (is_logged_in()) {
+                include 'views/community/edit_topic.php';
+            } else {
+                redirect(BASE_URL . '/?route=login');
+            }
+            break;
         case 'q_and_a':
             include 'views/q_and_a.php';
             break;

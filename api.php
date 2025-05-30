@@ -51,11 +51,47 @@ switch ($action) {
     case 'get_guide_details':
         handle_get_guide_details();
         break;
-    // Add other API actions here (e.g., etc.)
+    case 'edit_guide':
+        handle_edit_guide();
+        break;
+    case 'delete_guide':
+        handle_delete_guide();
+        break;
+    case 'edit_topic':
+        handle_edit_topic();
+        break;
+    case 'edit_post':
+        handle_edit_post();
+        break;
+    case 'delete_post':
+        handle_delete_post();
+        break;
+    case 'delete_topic':
+        handle_delete_topic();
+        break;
+    case 'edit_q_and_a':
+        handle_edit_q_and_a();
+        break;
+    case 'delete_q_and_a':
+        handle_delete_q_and_a();
+        break;
     default:
         http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Invalid API action.']);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid API action: ' . $action]);
         break;
+}
+
+function parse_raw_post_data() {
+    $input = file_get_contents('php://input');
+    $data = [];
+    $content_type = $_SERVER['CONTENT_TYPE'] ?? '';
+
+    if (strpos($content_type, 'application/json') !== false) {
+        $data = json_decode($input, true);
+    } else {
+        parse_str($input, $data);
+    }
+    return $data;
 }
 
 function handle_get_guide_details() {
@@ -122,6 +158,823 @@ function handle_get_guide_details() {
         error_log("Get guide details error: " . $e->getMessage());
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => 'Failed to fetch guide details.']);
+    }
+}
+
+function handle_edit_post() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    // Use $_POST if available, otherwise parse raw input
+    $request_data = $_POST;
+    if (empty($request_data) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $request_data = parse_raw_post_data();
+    }
+
+    $csrf_token = $request_data['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to edit posts.']);
+        return;
+    }
+
+    $post_id = (int)($request_data['post_id'] ?? 0);
+    $content = sanitize_input($request_data['content'] ?? '');
+
+    if ($post_id <= 0 || empty($content)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Post ID and content are required. Received POST data: ' . json_encode($request_data)]);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT user_id FROM forum_posts WHERE post_id = :post_id");
+        $stmt->execute([':post_id' => $post_id]);
+        $post_author_id = $stmt->fetchColumn();
+
+        if (!$post_author_id) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Post not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can edit any post, Registered User/Ulama can edit their own
+        if ($user_role_id < ROLE_ADMIN && $user_id != $post_author_id) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only edit your own posts.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Update forum_posts table
+        $stmt = $pdo->prepare("UPDATE forum_posts SET content = :content WHERE post_id = :post_id");
+        $stmt->execute([
+            ':content' => $content,
+            ':post_id' => $post_id
+        ]);
+
+        $pdo->commit();
+        echo json_encode(['status' => 'success', 'message' => 'Post updated successfully!', 'post_id' => $post_id]);
+        exit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Edit post error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to update post.']);
+        exit();
+    }
+}
+
+function handle_delete_post() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    // Use $_POST if available, otherwise parse raw input
+    $request_data = $_POST;
+    if (empty($request_data) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $request_data = parse_raw_post_data();
+    }
+
+    $csrf_token = $request_data['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to delete posts.']);
+        return;
+    }
+
+    $post_id = (int)($request_data['post_id'] ?? 0);
+
+    if ($post_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid post ID. Received POST data: ' . json_encode($request_data)]);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT user_id, topic_id FROM forum_posts WHERE post_id = :post_id");
+        $stmt->execute([':post_id' => $post_id]);
+        $post_data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$post_data) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Post not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can delete any post, Registered User/Ulama can delete their own
+        if ($user_role_id < ROLE_ADMIN && $user_id != $post_data['user_id']) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only delete your own posts.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Check if this is the first post of a topic
+        $stmt_first_post = $pdo->prepare("SELECT post_id FROM forum_posts WHERE topic_id = :topic_id ORDER BY created_at ASC LIMIT 1");
+        $stmt_first_post->execute([':topic_id' => $post_data['topic_id']]);
+        $first_post_id = $stmt_first_post->fetchColumn();
+
+        if ($post_id == $first_post_id) {
+            // If it's the first post, delete the entire topic
+            $pdo->prepare("DELETE FROM forum_posts WHERE topic_id = :topic_id")->execute([':topic_id' => $post_data['topic_id']]);
+            $pdo->prepare("DELETE FROM forum_topics WHERE topic_id = :topic_id")->execute([':topic_id' => $post_data['topic_id']]);
+            $message = 'First post and associated topic deleted successfully.';
+        } else {
+            // Otherwise, just delete the post
+            $stmt = $pdo->prepare("DELETE FROM forum_posts WHERE post_id = :post_id");
+            $stmt->execute([':post_id' => $post_id]);
+            $message = 'Post deleted successfully.';
+        }
+
+        if ($stmt->rowCount() > 0) {
+            $pdo->commit();
+            echo json_encode(['status' => 'success', 'message' => $message]);
+            exit();
+        } else {
+            $pdo->rollBack();
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Post not found or already deleted.']);
+            exit();
+        }
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Delete post error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to delete post.']);
+        exit();
+    }
+}
+
+function handle_edit_q_and_a() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to edit Q&A.']);
+        return;
+    }
+
+    $qa_id = (int)($_POST['qa_id'] ?? 0);
+    $question_text = sanitize_input($_POST['question_text'] ?? '');
+    $answer_text = sanitize_input($_POST['answer_text'] ?? ''); // Optional, only for scholars
+
+    if ($qa_id <= 0 || empty($question_text)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Q&A ID and question text are required.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Get current Q&A details to check ownership
+        $stmt = $pdo->prepare("SELECT user_id, answered_by FROM q_and_a WHERE qa_id = :qa_id");
+        $stmt->execute([':qa_id' => $qa_id]);
+        $qa_entry = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$qa_entry) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Q&A entry not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Determine if user has permission to edit
+        $can_edit_question = ($user_role_id >= ROLE_ADMIN || $user_id == $qa_entry['user_id']);
+        $can_edit_answer = ($user_role_id >= ROLE_ADMIN || ($user_role_id >= ROLE_ULAMA_SCHOLAR && $user_id == $qa_entry['answered_by']));
+
+        if (!$can_edit_question && !$can_edit_answer) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only edit your own questions or answers.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Update question text
+        $stmt = $pdo->prepare("UPDATE q_and_a SET question_text = :question_text WHERE qa_id = :qa_id");
+        $stmt->execute([
+            ':question_text' => $question_text,
+            ':qa_id' => $qa_id
+        ]);
+
+        // Update answer text if provided and user has permission
+        if (!empty($answer_text) && $can_edit_answer) {
+            $stmt = $pdo->prepare("UPDATE q_and_a SET answer_text = :answer_text, answered_by = :answered_by, answered_at = CURRENT_TIMESTAMP WHERE qa_id = :qa_id");
+            $stmt->execute([
+                ':answer_text' => $answer_text,
+                ':answered_by' => $user_id,
+                ':qa_id' => $qa_id
+            ]);
+        } elseif (empty($answer_text) && $can_edit_answer && !empty($qa_entry['answer_text'])) {
+            // If answer is being cleared by a scholar/admin
+            $stmt = $pdo->prepare("UPDATE q_and_a SET answer_text = NULL, answered_by = NULL, answered_at = NULL WHERE qa_id = :qa_id");
+            $stmt->execute([':qa_id' => $qa_id]);
+        }
+
+
+        $pdo->commit();
+        echo json_encode(['status' => 'success', 'message' => 'Q&A entry updated successfully!', 'qa_id' => $qa_id]);
+        exit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Edit Q&A error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to update Q&A entry.']);
+        exit();
+    }
+}
+
+function handle_delete_q_and_a() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to delete Q&A.']);
+        return;
+    }
+
+    $qa_id = (int)($_POST['qa_id'] ?? 0);
+
+    if ($qa_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid Q&A ID.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Get current Q&A details to check ownership
+        $stmt = $pdo->prepare("SELECT user_id, answered_by FROM q_and_a WHERE qa_id = :qa_id");
+        $stmt->execute([':qa_id' => $qa_id]);
+        $qa_entry = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$qa_entry) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Q&A entry not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can delete any Q&A.
+        // Original question author can delete their own question if not answered.
+        // Scholar who answered can delete their answer (which clears the answer, not the question).
+        $can_delete_question = ($user_role_id >= ROLE_ADMIN || ($user_id == $qa_entry['user_id'] && empty($qa_entry['answer_text'])));
+        $can_clear_answer = ($user_role_id >= ROLE_ADMIN || ($user_role_id >= ROLE_ULAMA_SCHOLAR && $user_id == $qa_entry['answered_by'] && !empty($qa_entry['answer_text'])));
+
+        if (!$can_delete_question && !$can_clear_answer) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only delete your own unanswered questions, or clear your own answers.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        if ($can_delete_question) {
+            // Delete the entire Q&A entry
+            $stmt = $pdo->prepare("DELETE FROM q_and_a WHERE qa_id = :qa_id");
+            $stmt->execute([':qa_id' => $qa_id]);
+            if ($stmt->rowCount() > 0) {
+                $pdo->commit();
+                echo json_encode(['status' => 'success', 'message' => 'Q&A entry deleted successfully.']);
+                exit();
+            } else {
+                $pdo->rollBack();
+                http_response_code(404);
+                echo json_encode(['status' => 'error', 'message' => 'Q&A entry not found or already deleted.']);
+                exit();
+            }
+        } elseif ($can_clear_answer) {
+            // Clear only the answer, not the question
+            $stmt = $pdo->prepare("UPDATE q_and_a SET answer_text = NULL, answered_by = NULL, answered_at = NULL WHERE qa_id = :qa_id");
+            $stmt->execute([':qa_id' => $qa_id]);
+            if ($stmt->rowCount() > 0) {
+                $pdo->commit();
+                echo json_encode(['status' => 'success', 'message' => 'Answer cleared successfully.']);
+                exit();
+            } else {
+                $pdo->rollBack();
+                http_response_code(404);
+                echo json_encode(['status' => 'error', 'message' => 'Answer not found or already cleared.']);
+                exit();
+            }
+        }
+
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Delete Q&A error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to delete Q&A entry.']);
+        exit();
+    }
+}
+
+function handle_edit_topic() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to edit topics.']);
+        return;
+    }
+
+    $topic_id = (int)($_POST['topic_id'] ?? 0);
+    $topic_title = sanitize_input($_POST['topic_title'] ?? '');
+    $first_post_content = sanitize_input($_POST['first_post_content'] ?? '');
+
+    if ($topic_id <= 0 || empty($topic_title) || empty($first_post_content)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Topic ID, title, and content are required.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT user_id FROM forum_topics WHERE topic_id = :topic_id");
+        $stmt->execute([':topic_id' => $topic_id]);
+        $topic_author_id = $stmt->fetchColumn();
+
+        if (!$topic_author_id) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Topic not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can edit any topic, Registered User/Ulama can edit their own
+        if ($user_role_id < ROLE_ADMIN && $user_id != $topic_author_id) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only edit your own topics.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Update forum_topics table
+        $stmt = $pdo->prepare("UPDATE forum_topics SET title = :title WHERE topic_id = :topic_id");
+        $stmt->execute([
+            ':title' => $topic_title,
+            ':topic_id' => $topic_id
+        ]);
+
+        // Update the first post content (assuming the first post is always the main content)
+        $stmt = $pdo->prepare("UPDATE forum_posts SET content = :content WHERE topic_id = :topic_id AND parent_post_id IS NULL");
+        $stmt->execute([
+            ':content' => $first_post_content,
+            ':topic_id' => $topic_id
+        ]);
+
+        $pdo->commit();
+        echo json_encode(['status' => 'success', 'message' => 'Topic updated successfully!', 'topic_id' => $topic_id]);
+        exit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Edit topic error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to update topic.']);
+        exit();
+    }
+}
+
+function handle_delete_topic() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to delete topics.']);
+        return;
+    }
+
+    $topic_id = (int)($_POST['topic_id'] ?? 0);
+
+    if ($topic_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid topic ID.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT user_id FROM forum_topics WHERE topic_id = :topic_id");
+        $stmt->execute([':topic_id' => $topic_id]);
+        $topic_author_id = $stmt->fetchColumn();
+
+        if (!$topic_author_id) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Topic not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can delete any topic, Registered User/Ulama can delete their own
+        if ($user_role_id < ROLE_ADMIN && $user_id != $topic_author_id) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only delete your own topics.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Delete from related tables first (forum_posts)
+        $pdo->prepare("DELETE FROM forum_posts WHERE topic_id = :topic_id")->execute([':topic_id' => $topic_id]);
+
+        // Finally, delete the topic itself
+        $stmt = $pdo->prepare("DELETE FROM forum_topics WHERE topic_id = :topic_id");
+        $stmt->execute([':topic_id' => $topic_id]);
+
+        if ($stmt->rowCount() > 0) {
+            $pdo->commit();
+            echo json_encode(['status' => 'success', 'message' => 'Topic deleted successfully.']);
+            exit();
+        } else {
+            $pdo->rollBack();
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Topic not found or already deleted.']);
+            exit();
+        }
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Delete topic error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to delete topic.']);
+        exit();
+    }
+}
+
+function handle_edit_guide() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to edit guides.']);
+        return;
+    }
+
+    $guide_id = (int)($_POST['guide_id'] ?? 0);
+    $guide_title = sanitize_input($_POST['guide_title'] ?? '');
+    $guide_description = sanitize_input($_POST['guide_description'] ?? '');
+    $guide_category_id = (int)($_POST['guide_category'] ?? 0);
+    $guide_difficulty = sanitize_input($_POST['guide_difficulty'] ?? 'Beginner');
+    $steps = $_POST['steps'] ?? [];
+    $files = $_FILES['steps'] ?? [];
+    $deleted_images = json_decode($_POST['deleted_images'] ?? '[]', true);
+    $deleted_audio = json_decode($_POST['deleted_audio'] ?? '[]', true);
+
+    if ($guide_id <= 0 || empty($guide_title) || empty($guide_category_id) || empty($steps)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Guide ID, title, category, and at least one step are required.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT created_by FROM guides WHERE guide_id = :guide_id");
+        $stmt->execute([':guide_id' => $guide_id]);
+        $guide_author_id = $stmt->fetchColumn();
+
+        if (!$guide_author_id) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Guide not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can edit any guide, Ulama can edit their own
+        if ($user_role_id < ROLE_ADMIN && ($user_role_id < ROLE_ULAMA_SCHOLAR || $user_id != $guide_author_id)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only edit your own guides.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // 1. Update guides table
+        $stmt = $pdo->prepare("UPDATE guides SET title = :title, description = :description, category_id = :category_id, difficulty = :difficulty WHERE guide_id = :guide_id");
+        $stmt->execute([
+            ':title' => $guide_title,
+            ':description' => $guide_description,
+            ':category_id' => $guide_category_id,
+            ':difficulty' => $guide_difficulty,
+            ':guide_id' => $guide_id
+        ]);
+
+        // 2. Delete existing steps, references, and associated files for this guide
+        // Fetch existing files to delete
+        $stmt_old_files = $pdo->prepare("SELECT image_url, audio_url FROM guide_steps WHERE guide_id = :guide_id AND (image_url IS NOT NULL OR audio_url IS NOT NULL)");
+        $stmt_old_files->execute([':guide_id' => $guide_id]);
+        $old_files = $stmt_old_files->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($old_files as $file) {
+            if ($file['image_url'] && file_exists(MEDIA_UPLOAD_DIR . '/' . basename($file['image_url']))) {
+                unlink(MEDIA_UPLOAD_DIR . '/' . basename($file['image_url']));
+            }
+            if ($file['audio_url'] && file_exists(MEDIA_UPLOAD_DIR . '/' . basename($file['audio_url']))) {
+                unlink(MEDIA_UPLOAD_DIR . '/' . basename($file['audio_url']));
+            }
+        }
+
+        $stmt = $pdo->prepare("DELETE FROM guide_steps WHERE guide_id = :guide_id");
+        $stmt->execute([':guide_id' => $guide_id]);
+        $stmt = $pdo->prepare("DELETE FROM content_references WHERE guide_id = :guide_id");
+        $stmt->execute([':guide_id' => $guide_id]);
+
+        // 3. Process and insert updated guide steps
+        foreach ($steps as $step_number => $step_data) {
+            $step_title = sanitize_input($step_data['title'] ?? '');
+            $step_content = sanitize_input($step_data['content'] ?? '');
+            $step_reference = sanitize_input($step_data['reference'] ?? '');
+            $existing_image_url = sanitize_input($step_data['existing_image_url'] ?? '');
+            $existing_audio_url = sanitize_input($step_data['existing_audio_url'] ?? '');
+
+            $image_url = $existing_image_url;
+            $audio_url = $existing_audio_url;
+
+            // Handle image upload (if new file provided)
+            if (isset($files['name'][$step_number]['image']) && $files['error'][$step_number]['image'] === UPLOAD_ERR_OK) {
+                $image_tmp_name = $files['tmp_name'][$step_number]['image'];
+                $image_name = basename($files['name'][$step_number]['image']);
+                $image_ext = strtolower(pathinfo($image_name, PATHINFO_EXTENSION));
+                $allowed_image_types = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+                if (in_array($image_ext, $allowed_image_types) && $files['size'][$step_number]['image'] <= 5 * 1024 * 1024) { // Max 5MB
+                    $unique_image_name = uniqid('img_', true) . '.' . $image_ext;
+                    $image_destination = MEDIA_UPLOAD_DIR . '/' . $unique_image_name;
+                    if (move_uploaded_file($image_tmp_name, $image_destination)) {
+                        $image_url = 'uploads/' . $unique_image_name; // Relative path for web access
+                    } else {
+                        throw new Exception("Failed to move uploaded image for step $step_number.");
+                    }
+                } else {
+                    throw new Exception("Invalid image file for step $step_number. Allowed types: jpg, jpeg, png, gif, webp. Max size: 5MB.");
+                }
+            } elseif (in_array($existing_image_url, $deleted_images)) {
+                $image_url = null; // Mark for deletion if it was explicitly deleted
+            }
+
+            // Handle audio upload (if new file provided)
+            if (isset($files['name'][$step_number]['audio']) && $files['error'][$step_number]['audio'] === UPLOAD_ERR_OK) {
+                $audio_tmp_name = $files['tmp_name'][$step_number]['audio'];
+                $audio_name = basename($files['name'][$step_number]['audio']);
+                $audio_ext = strtolower(pathinfo($audio_name, PATHINFO_EXTENSION));
+                $allowed_audio_types = ['mp3', 'wav', 'ogg'];
+
+                if (in_array($audio_ext, $allowed_audio_types) && $files['size'][$step_number]['audio'] <= 10 * 1024 * 1024) { // Max 10MB
+                    $unique_audio_name = uniqid('audio_', true) . '.' . $audio_ext;
+                    $audio_destination = MEDIA_UPLOAD_DIR . '/' . $unique_audio_name;
+                    if (move_uploaded_file($audio_tmp_name, $audio_destination)) {
+                        $audio_url = 'uploads/' . $unique_audio_name; // Relative path for web access
+                    } else {
+                        throw new Exception("Failed to move uploaded audio for step $step_number.");
+                    }
+                } else {
+                    throw new Exception("Invalid audio file for step $step_number. Allowed types: mp3, wav, ogg. Max size: 10MB.");
+                }
+            } elseif (in_array($existing_audio_url, $deleted_audio)) {
+                $audio_url = null; // Mark for deletion if it was explicitly deleted
+            }
+
+            $stmt = $pdo->prepare("INSERT INTO guide_steps (guide_id, step_number, title, content, image_url, audio_url) VALUES (:guide_id, :step_number, :title, :content, :image_url, :audio_url)");
+            $stmt->execute([
+                ':guide_id' => $guide_id,
+                ':step_number' => $step_number,
+                ':title' => $step_title,
+                ':content' => $step_content,
+                ':image_url' => $image_url,
+                ':audio_url' => $audio_url
+            ]);
+            $step_id = $pdo->lastInsertId();
+
+            // Insert reference if provided
+            if (!empty($step_reference)) {
+                $stmt = $pdo->prepare("INSERT INTO content_references (guide_id, step_id, source, reference_text) VALUES (:guide_id, :step_id, :source, :reference_text)");
+                $stmt->execute([
+                    ':guide_id' => $guide_id,
+                    ':step_id' => $step_id,
+                    ':source' => 'User Input',
+                    ':reference_text' => $step_reference
+                ]);
+            }
+        }
+
+        $pdo->commit();
+        echo json_encode(['status' => 'success', 'message' => 'Guide updated successfully!', 'guide_id' => $guide_id]);
+        exit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Edit guide error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to update guide: ' . $e->getMessage()]);
+        exit();
+    }
+}
+
+function handle_delete_guide() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_token($csrf_token)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        return;
+    }
+
+    if (!is_logged_in()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'You must be logged in to delete guides.']);
+        return;
+    }
+
+    $guide_id = (int)($_POST['guide_id'] ?? 0);
+
+    if ($guide_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid guide ID.']);
+        return;
+    }
+
+    $pdo = get_db_connection();
+
+    try {
+        $pdo->beginTransaction();
+
+        // Check ownership/permissions
+        $stmt = $pdo->prepare("SELECT created_by FROM guides WHERE guide_id = :guide_id");
+        $stmt->execute([':guide_id' => $guide_id]);
+        $guide_author_id = $stmt->fetchColumn();
+
+        if (!$guide_author_id) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Guide not found.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        $user_id = $_SESSION['user_id'];
+        $user_role_id = get_user_role_id();
+
+        // Admin can delete any guide, Ulama can delete their own
+        if ($user_role_id < ROLE_ADMIN && ($user_role_id < ROLE_ULAMA_SCHOLAR || $user_id != $guide_author_id)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Permission denied. You can only delete your own guides.']);
+            $pdo->rollBack();
+            return;
+        }
+
+        // Fetch associated files to delete from disk
+        $stmt_files = $pdo->prepare("SELECT image_url, audio_url FROM guide_steps WHERE guide_id = :guide_id AND (image_url IS NOT NULL OR audio_url IS NOT NULL)");
+        $stmt_files->execute([':guide_id' => $guide_id]);
+        $files_to_delete = $stmt_files->fetchAll(PDO::FETCH_ASSOC);
+
+        // Delete from related tables first to maintain referential integrity
+        $pdo->prepare("DELETE FROM comments WHERE guide_id = :guide_id")->execute([':guide_id' => $guide_id]);
+        $pdo->prepare("DELETE FROM ratings WHERE guide_id = :guide_id")->execute([':guide_id' => $guide_id]);
+        $pdo->prepare("DELETE FROM favorites WHERE guide_id = :guide_id")->execute([':guide_id' => $guide_id]);
+        $pdo->prepare("DELETE FROM content_references WHERE guide_id = :guide_id")->execute([':guide_id' => $guide_id]);
+        $pdo->prepare("DELETE FROM guide_steps WHERE guide_id = :guide_id")->execute([':guide_id' => $guide_id]);
+
+        // Finally, delete the guide itself
+        $stmt = $pdo->prepare("DELETE FROM guides WHERE guide_id = :guide_id");
+        $stmt->execute([':guide_id' => $guide_id]);
+
+        if ($stmt->rowCount() > 0) {
+            // Delete actual files from disk
+            foreach ($files_to_delete as $file) {
+                if ($file['image_url'] && file_exists(MEDIA_UPLOAD_DIR . '/' . basename($file['image_url']))) {
+                    unlink(MEDIA_UPLOAD_DIR . '/' . basename($file['image_url']));
+                }
+                if ($file['audio_url'] && file_exists(MEDIA_UPLOAD_DIR . '/' . basename($file['audio_url']))) {
+                    unlink(MEDIA_UPLOAD_DIR . '/' . basename($file['audio_url']));
+                }
+            }
+            $pdo->commit();
+            echo json_encode(['status' => 'success', 'message' => 'Guide deleted successfully.']);
+            exit();
+        } else {
+            $pdo->rollBack();
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Guide not found or already deleted.']);
+            exit();
+        }
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log("Delete guide error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to delete guide.']);
+        exit();
     }
 }
 

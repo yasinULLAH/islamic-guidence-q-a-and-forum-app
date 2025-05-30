@@ -13,7 +13,8 @@
                 g.difficulty,
                 g.created_at,
                 c.category_name,
-                u.username AS author_username
+                u.username AS author_username,
+                g.created_by AS author_user_id
             FROM
                 guides g
             JOIN
@@ -41,6 +42,26 @@
             <p class="lead"><?php echo htmlspecialchars($guide['description']); ?></p>
             <p><strong>Category:</strong> <?php echo htmlspecialchars($guide['category_name']); ?> | <strong>Difficulty:</strong> <?php echo htmlspecialchars($guide['difficulty']); ?></p>
             <p><small class="text-muted">Created by <?php echo htmlspecialchars($guide['author_username']); ?> on <?php echo date('M d, Y', strtotime($guide['created_at'])); ?></small></p>
+
+            <?php
+            $can_edit_delete = false;
+            if (is_logged_in()) {
+                $user_id = $_SESSION['user_id'];
+                $user_role_id = get_user_role_id();
+                // Admin can edit/delete any guide
+                // Ulama can edit/delete their own guides
+                if ($user_role_id >= ROLE_ADMIN || ($user_role_id >= ROLE_ULAMA_SCHOLAR && $user_id == $guide['author_user_id'])) {
+                    $can_edit_delete = true;
+                }
+            }
+            ?>
+
+            <?php if ($can_edit_delete): ?>
+                <div class="mb-3">
+                    <a href="<?php echo BASE_URL; ?>/?route=edit_guide&id=<?php echo htmlspecialchars($guide['guide_id']); ?>" class="btn btn-info btn-sm me-2">Edit Guide</a>
+                    <button type="button" class="btn btn-danger btn-sm" id="deleteGuideBtn" data-guide-id="<?php echo htmlspecialchars($guide['guide_id']); ?>">Delete Guide</button>
+                </div>
+            <?php endif; ?>
 
             <?php if (is_logged_in()):
                 $stmt_fav = $pdo->prepare("SELECT COUNT(*) FROM favorites WHERE user_id = :user_id AND guide_id = :guide_id");
@@ -288,10 +309,41 @@ document.addEventListener('DOMContentLoaded', function() {
     const referencesData = <?php echo json_encode($references); ?>;
     const guideDifficulty = '<?php echo htmlspecialchars($guide['difficulty']); ?>'; // Pass guide difficulty
     const baseUrl = '<?php echo BASE_URL; ?>';
+    const csrfToken = document.querySelector('input[name="csrf_token"]').value;
     <?php
     // Restore error reporting
     error_reporting($old_error_reporting);
     ?>
+
+    // Delete Guide Logic
+    const deleteGuideBtn = document.getElementById('deleteGuideBtn');
+    if (deleteGuideBtn) {
+        deleteGuideBtn.addEventListener('click', function() {
+            const guideId = this.dataset.guideId;
+            if (confirm('Are you sure you want to delete this guide? This action cannot be undone.')) {
+                fetch(`api.php?action=delete_guide`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `guide_id=${guideId}&csrf_token=${csrfToken}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert(data.message);
+                        window.location.href = `${baseUrl}/?route=guides`; // Redirect to guides list
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    alert('An error occurred during deletion. Please try again.');
+                });
+            }
+        });
+    }
 
     // View Mode Toggle Logic
     const linearViewBtn = document.getElementById('linearViewBtn');
